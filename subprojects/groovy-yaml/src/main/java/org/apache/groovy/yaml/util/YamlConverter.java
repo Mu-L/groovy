@@ -26,6 +26,7 @@ import groovy.yaml.YamlRuntimeException;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.util.List;
 
 /**
  *  A converter for converting YAML to JSON, vice versa
@@ -39,8 +40,11 @@ public class YamlConverter {
      */
     public static String convertYamlToJson(Reader yamlReader) {
         try (Reader reader = yamlReader) {
-            Object yaml = new ObjectMapper(new YAMLFactory()).readValue(reader, Object.class);
-
+            List<Object> resultList =
+                    new ObjectMapper()
+                            .readValues(new YAMLFactory().createParser(reader), Object.class)
+                            .readAll();
+            Object yaml = 1 == resultList.size() ? resultList.get(0) : resultList;
             return new ObjectMapper().writeValueAsString(yaml);
         } catch (IOException e) {
             throw new YamlRuntimeException(e);

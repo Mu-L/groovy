@@ -16,21 +16,23 @@
  *  specific language governing permissions and limitations
  *  under the License.
  */
-package groovy.bugs
 
-import groovy.test.GroovyTestCase
-
-class Groovy4206Bug extends GroovyTestCase {
-    void testIsNamesForBooleanProps() {
-        assert Bar4206.isValid()
-        assert Bar4206.valid
-        assert '1.1E2'.isBigDecimal()
-        assert '1.1E2'.bigDecimal
-        assert '    '.isAllWhitespace()
-        assert '    '.allWhitespace
+def a = 6
+try {
+    switch(a) {
+        case 8 -> 'b'
+        default -> throw new RuntimeException('z')
     }
+} catch (e) {
+    assert 'z' == e.message
 }
 
-class Bar4206 {
-    static Boolean isValid() { true }
+def r = switch(a) {
+    case 6 -> {
+        def x = 'a'
+        yield x
+    }
+    default -> throw new RuntimeException('z')
 }
+assert 'a' == r
+

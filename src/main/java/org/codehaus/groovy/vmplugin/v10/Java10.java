@@ -42,4 +42,9 @@ public class Java10 extends Java9 {
     public Class<?>[] getPluginDefaultGroovyMethods() {
         return PLUGIN_DGM;
     }
+
+    @Override
+    public int getVersion() {
+        return 10;
+    }
 }

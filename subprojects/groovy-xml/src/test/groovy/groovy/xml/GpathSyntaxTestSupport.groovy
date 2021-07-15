@@ -18,12 +18,12 @@
  */
 package groovy.xml
 
-import org.custommonkey.xmlunit.XMLUnit
 import org.custommonkey.xmlunit.Diff
-import groovy.xml.XmlUtil
+import org.custommonkey.xmlunit.XMLUnit
 
 class GpathSyntaxTestSupport {
-    private static final sampleXml = '''
+
+    private static final sampleXml = '''\
 <characters>
     <character id="1" name="Wallace">
         <likes>cheese</likes>
@@ -35,11 +35,11 @@ class GpathSyntaxTestSupport {
     <booleanValue>y</booleanValue>
     <uriValue>http://example.org/</uriValue>
     <urlValue>http://example.org/</urlValue>
-    <empty/>
+    <noValue/>
 </characters>
 '''
 
-    private static final nestedXml = '''
+    private static final nestedXml = '''\
 <root>
     <a><z/><z/><y/></a>
     <b><z/></b>
@@ -87,7 +87,7 @@ class GpathSyntaxTestSupport {
             // additional DOM long-hand syntax
             // for illustrative purposes only
             assert likes.item(0).nodeName == 'likes'
-            assert wallaceLikes.firstChild.nodeValue == 'cheese'
+            assert wallaceLikes.getFirstChild().nodeValue == 'cheese'
             if (wallaceLikes.class.name.contains('xerces')) {
                 assert 'cheese' == wallaceLikes.textContent
             }
@@ -100,7 +100,7 @@ class GpathSyntaxTestSupport {
         def unknownAttr = root.'@xxx'
         assert isSlurper(root) || !unknownAttr
         assert !isSlurper(root) || unknownAttr.isEmpty()
-        assert root.'empty'.text() == ''
+        assert root.'noValue'.text() == ''
     }
 
     static void checkCDataText(Closure getRoot) {

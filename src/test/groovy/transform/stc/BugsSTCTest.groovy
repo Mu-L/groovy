@@ -90,34 +90,101 @@ class BugsSTCTest extends StaticTypeCheckingTestCase {
     // GROOVY-7929
     void testShouldDetectInvalidMethodUseWithinTraitWithCompileStaticAndSelfType() {
         shouldFailWithMessages '''
-            class C1 {
-                def c1() { }
+            class C {
+                def m() { }
             }
             @groovy.transform.CompileStatic
-            @groovy.transform.SelfType(C1)
-            trait TT {
-                def foo() {
-                    c2()
+            @groovy.transform.SelfType(C)
+            trait T {
+                void test() {
+                    x()
                 }
             }
-        ''', 'Cannot find matching method <UnionType:C1+TT>#c2'
+        ''', 'Cannot find matching method <UnionType:C+T>#x'
+    }
+
+    // GROOVY-10102
+    void testShouldDetectValidMethodUseWithinTraitWithCompileStaticAndSelfType() {
+        assertScript '''
+            import groovy.transform.*
+
+            trait A {
+                String foo = 'foo'
+                String m(String s, Closure x) {
+                    s + x()
+                }
+            }
+            @SelfType(A)
+            trait B {
+            }
+            @SelfType(B)
+            trait C {
+            }
+            @CompileStatic
+            @SelfType(C)
+            trait D {
+                def test() {
+                    String s = foo
+                    m(s) {
+                        s.toUpperCase()
+                    }
+                }
+            }
+
+            class E implements A, B, C, D { }
+            assert new E().test() == 'fooFOO'
+        '''
+    }
+
+    // GROOVY-10106
+    void testCallStaticOrPrivateMethodInTraitFieldInitializer() {
+        ['private', 'static', 'private static'].each { mods ->
+            assertScript """
+                class C {
+                    String s
+                }
+                trait T {
+                    final C c = new C().tap {
+                        config(it)
+                    }
+                    $mods void config(C c) {
+                        c.s = 'x'
+                    }
+                }
+                class U implements T {
+                }
+                def c = new U().c
+                assert c.s == 'x'
+            """
+        }
+
+        shouldFailWithMessages '''
+            trait T {
+                def obj = new Object().tap {
+                    config(it)
+                }
+                static void config(String s) {
+                }
+            }
+        ''',
+        'Cannot find matching method T$Trait$Helper#config(java.lang.Class, java.lang.Object)'
     }
 
     void testGroovy5444() {
         assertScript '''
-                def curr = { System.currentTimeMillis() }
+            def millis = { System.currentTimeMillis() }
 
-                5.times {
-                    @ASTTest(phase=INSTRUCTION_SELECTION, value= {
-                        assert node.getNodeMetaData(INFERRED_TYPE) == Long_TYPE
-                    })
-                    def t0 = curr()
-                    100000.times {
-                        "echo"
-                    }
-                    println (curr() - t0)
-                }'''
-
+            5.times {
+                @ASTTest(phase=INSTRUCTION_SELECTION, value= {
+                    assert node.getNodeMetaData(INFERRED_TYPE) == Long_TYPE
+                })
+                def t0 = millis()
+                1000.times {
+                    "echo"
+                }
+                def elapsed = millis() - t0
+            }
+        '''
     }
 
     void testGroovy5487ReturnNull() {

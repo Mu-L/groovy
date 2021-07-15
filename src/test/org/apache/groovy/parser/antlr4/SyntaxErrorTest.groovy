@@ -83,7 +83,7 @@ final class SyntaxErrorTest extends GroovyTestCase {
         // TODO: Could the character be escaped in the error message?
         assert err == '''\
             |startup failed:
-            |test.groovy: 1: Unexpected input: 'def \u200B' @ line 1, column 5.
+            |test.groovy: 1: Unexpected character: '\u200B' @ line 1, column 5.
             |   def \u200Bname = null
             |       ^
             |
@@ -99,7 +99,7 @@ final class SyntaxErrorTest extends GroovyTestCase {
         // TODO: Could the character be escaped in the error message?
         assert err == '''\
             |startup failed:
-            |test.groovy: 1: Unexpected input: '\u200B' @ line 1, column 7.
+            |test.groovy: 1: Unexpected character: '\u200B' @ line 1, column 7.
             |   def na\u200Bme = null
             |         ^
             |
@@ -115,9 +115,26 @@ final class SyntaxErrorTest extends GroovyTestCase {
         // TODO: Could the character be escaped in the error message?
         assert err == '''\
             |startup failed:
-            |test.groovy: 1: Unexpected input: '\u000C' @ line 1, column 7.
+            |test.groovy: 1: Unexpected character: '\u000C' @ line 1, column 7.
             |   def na\u000Cme = null
             |         ^
+            |
+            |1 error
+            |'''.stripMargin()
+    }
+
+    void 'test groovy core - UnexpectedCharacter 3'() {
+        def err = expectParseError '''\
+            |foo.bar {
+            |  println 'Hello
+            |}
+            |'''.stripMargin()
+
+        assert err == '''\
+            |startup failed:
+            |test.groovy: 2: Unexpected character: '\\'' @ line 2, column 11.
+            |     println 'Hello
+            |             ^
             |
             |1 error
             |'''.stripMargin()
@@ -224,7 +241,7 @@ final class SyntaxErrorTest extends GroovyTestCase {
     }
 
     void 'test groovy core - AnnotationDeclaration 1'() {
-        TestUtils.doRunAndShouldFail('fail/AnnotationDeclaration_01x.groovy');
+        TestUtils.doRunAndShouldFail('fail/AnnotationDeclaration_01x.groovy')
     }
 
     void 'test groovy core - AnnotationDeclaration 2'() {
@@ -401,6 +418,17 @@ final class SyntaxErrorTest extends GroovyTestCase {
     void 'test groovy core - Array'() {
         TestUtils.doRunAndShouldFail('fail/Array_01x.groovy')
         TestUtils.doRunAndShouldFail('fail/Array_02x.groovy')
+    }
+
+    void "test groovy core - SwitchExpression"() {
+        TestUtils.doRunAndShouldFail('fail/SwitchExpression_01x.groovy')
+        TestUtils.doRunAndShouldFail('fail/SwitchExpression_02x.groovy')
+        TestUtils.doRunAndShouldFail('fail/SwitchExpression_03x.groovy')
+        TestUtils.doRunAndShouldFail('fail/SwitchExpression_04x.groovy')
+        TestUtils.doRunAndShouldFail('fail/SwitchExpression_05x.groovy')
+        TestUtils.doRunAndShouldFail('fail/SwitchExpression_06x.groovy')
+		TestUtils.doRunAndShouldFail('fail/SwitchExpression_07x.groovy')
+		TestUtils.doRunAndShouldFail('fail/SwitchExpression_08x.groovy')
     }
 
     @NotYetImplemented

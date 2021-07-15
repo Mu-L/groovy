@@ -68,6 +68,37 @@ final class CategoryTest extends GroovyTestCase {
         }
     }
 
+    // GROOVY-10133
+    void testCategoryDefinedProperties2() {
+        assertScript '''
+            class Cat {
+                static boolean isAbc(self) { true }
+                static boolean getAbc(self) { false }
+            }
+            use (Cat) {
+                assert abc // should select "isAbc()"
+            }
+        '''
+    }
+
+    // GROOVY-5245
+    void testCategoryDefinedProperties3() {
+        assertScript '''
+            class Isser {
+                boolean isWorking() { true }
+            }
+            class IsserCat {
+                static boolean getWorking2(Isser b) { true }
+                static boolean isNotWorking(Isser b) { true }
+            }
+            use (IsserCat) {
+                assert new Isser().working
+                assert new Isser().working2
+                assert new Isser().notWorking // MissingPropertyException
+            }
+        '''
+    }
+
     void testCategoryReplacedPropertyAccessMethod() {
         def cth = new CategoryTestHelper()
         cth.aProperty = "aValue"
@@ -180,15 +211,15 @@ final class CategoryTest extends GroovyTestCase {
         """
     }
 
-
     def foo(x){x.bar()}
+
     void testMethodHiding1() {
         def x = new X()
         assert foo(x) == 1
         use (XCat) {
-	        assert foo(x) == 2
-	        def t = Thread.start {assert foo(x)==1}
-	        t.join()
+            assert foo(x) == 2
+            def t = Thread.start {assert foo(x)==1}
+            t.join()
         }
         assert foo(x) == 1
         def t = Thread.start {use (XCat2){assert foo(x)==3}}
@@ -200,12 +231,12 @@ final class CategoryTest extends GroovyTestCase {
         def x = new X()
         assert foo(x) == 1
         use (XCat) {
-	        assert foo(x) == 2
-        	def t = Thread.start {use (XCat2){assert foo(x)==3}}
-        	t.join()
-        	assert foo(x) == 2
-	        t = Thread.start {assert foo(x)==1}
-	        t.join()
+            assert foo(x) == 2
+            def t = Thread.start {use (XCat2){assert foo(x)==3}}
+            t.join()
+            assert foo(x) == 2
+            t = Thread.start {assert foo(x)==1}
+            t.join()
         }
         assert foo(x) == 1
         def t = Thread.start {use (XCat2){assert foo(x)==3}}
@@ -244,6 +275,20 @@ final class CategoryTest extends GroovyTestCase {
 
             use(C) {
                 assert new B().baz() == 1
+            }
+        '''
+    }
+
+    // GROOVY-5453
+    void testOverloadedGetterMethod() {
+        assertScript '''
+            class Cat {
+                static getFoo(String s) {'String'}
+                static getFoo(CharSequence s) {'CharSequence'}
+            }
+            use (Cat) {
+                assert 'abc'.getFoo() == 'String'
+                assert 'abc'.foo      == 'String'
             }
         '''
     }

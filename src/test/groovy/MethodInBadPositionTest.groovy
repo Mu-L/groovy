@@ -40,6 +40,6 @@ class MethodInBadPositionTest extends CompilableTestSupport {
                 case 1: def say(){}
             }
         ''')
-        assert msg.contains('Method definition not expected here')  || msg.contains("Unexpected input: '('")
+        assert msg.contains('Method definition not expected here')  || msg.contains("Unexpected input: '('") || msg.contains("Unexpected input: 'switch(1)")
     }
 }

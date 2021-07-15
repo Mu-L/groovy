@@ -101,22 +101,22 @@ import static org.codehaus.groovy.ast.ClassHelper.float_TYPE;
 import static org.codehaus.groovy.ast.ClassHelper.getUnwrapper;
 import static org.codehaus.groovy.ast.ClassHelper.getWrapper;
 import static org.codehaus.groovy.ast.ClassHelper.int_TYPE;
+import static org.codehaus.groovy.ast.ClassHelper.isBigDecimalType;
+import static org.codehaus.groovy.ast.ClassHelper.isClassType;
+import static org.codehaus.groovy.ast.ClassHelper.isGStringType;
+import static org.codehaus.groovy.ast.ClassHelper.isGroovyObjectType;
 import static org.codehaus.groovy.ast.ClassHelper.isNumberType;
+import static org.codehaus.groovy.ast.ClassHelper.isObjectType;
+import static org.codehaus.groovy.ast.ClassHelper.isPrimitiveBoolean;
 import static org.codehaus.groovy.ast.ClassHelper.isPrimitiveType;
 import static org.codehaus.groovy.ast.ClassHelper.isSAMType;
+import static org.codehaus.groovy.ast.ClassHelper.isStringType;
+import static org.codehaus.groovy.ast.ClassHelper.isWrapperBoolean;
 import static org.codehaus.groovy.ast.ClassHelper.long_TYPE;
 import static org.codehaus.groovy.ast.ClassHelper.make;
 import static org.codehaus.groovy.ast.ClassHelper.makeWithoutCaching;
 import static org.codehaus.groovy.ast.ClassHelper.short_TYPE;
 import static org.codehaus.groovy.ast.ClassHelper.void_WRAPPER_TYPE;
-import static org.codehaus.groovy.ast.ClassHelper.isBigDecimalType;
-import static org.codehaus.groovy.ast.ClassHelper.isClassType;
-import static org.codehaus.groovy.ast.ClassHelper.isGStringType;
-import static org.codehaus.groovy.ast.ClassHelper.isGroovyObjectType;
-import static org.codehaus.groovy.ast.ClassHelper.isObjectType;
-import static org.codehaus.groovy.ast.ClassHelper.isPrimitiveBoolean;
-import static org.codehaus.groovy.ast.ClassHelper.isStringType;
-import static org.codehaus.groovy.ast.ClassHelper.isWrapperBoolean;
 import static org.codehaus.groovy.ast.tools.WideningCategories.isBigIntCategory;
 import static org.codehaus.groovy.ast.tools.WideningCategories.isFloatingCategory;
 import static org.codehaus.groovy.ast.tools.WideningCategories.isNumberCategory;
@@ -662,6 +662,10 @@ public abstract class StaticTypeCheckingSupport {
      * @see org.codehaus.groovy.runtime.typehandling.DefaultTypeTransformation#castToType(Object,Class)
      */
     public static boolean checkCompatibleAssignmentTypes(final ClassNode left, final ClassNode right, final Expression rightExpression, final boolean allowConstructorCoercion) {
+        if (!isPrimitiveType(left) && isNullConstant(rightExpression)) {
+            return true;
+        }
+
         // GROOVY-7307, GROOVY-9952, et al.
         if (left.isGenericsPlaceHolder()) {
             GenericsType[] genericsTypes = left.getGenericsTypes();
@@ -705,13 +709,8 @@ public abstract class StaticTypeCheckingSupport {
             }
         }
 
-        boolean rightExpressionIsNull = isNullConstant(rightExpression);
-        if (rightExpressionIsNull && !isPrimitiveType(left)) {
-            return true;
-        }
-
         // anything can be assigned to an Object, String, [Bb]oolean or Class receiver; except null to boolean
-        if (isWildcardLeftHandSide(left) && !(leftRedirect == boolean_TYPE && rightExpressionIsNull)) return true;
+        if (isWildcardLeftHandSide(left) && !(leftRedirect == boolean_TYPE && isNullConstant(rightExpression))) return true;
 
         if (leftRedirect == char_TYPE && rightRedirect == Character_TYPE) return true;
         if (leftRedirect == Character_TYPE && rightRedirect == char_TYPE) return true;
@@ -2174,24 +2173,9 @@ public abstract class StaticTypeCheckingSupport {
      * @param node a class for which we want to retrieve all interfaces
      * @return a set of interfaces implemented by this class node
      */
+    @Deprecated
     public static Set<ClassNode> collectAllInterfaces(final ClassNode node) {
-        Set<ClassNode> result = new HashSet<>();
-        collectAllInterfaces(node, result);
-        return result;
-    }
-
-    /**
-     * Collects all interfaces of a class node, including those defined by the
-     * super class.
-     *
-     * @param node a class for which we want to retrieve all interfaces
-     * @param out  the set where to collect interfaces
-     */
-    private static void collectAllInterfaces(final ClassNode node, final Set<ClassNode> out) {
-        if (node == null) return;
-        Set<ClassNode> allInterfaces = node.getAllInterfaces();
-        out.addAll(allInterfaces);
-        collectAllInterfaces(node.getSuperClass(), out);
+        return GeneralUtils.getInterfacesAndSuperInterfaces(node);
     }
 
     /**

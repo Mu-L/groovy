@@ -1121,7 +1121,11 @@ final class InnerClassTest {
             class A {
                 static field = 10
 
-                void main(a) {
+                static main(args) {
+                    new A().test()
+                }
+
+                void test() {
                     assert new C().m() == [10,12,14,16]
                 }
 
@@ -1751,6 +1755,26 @@ final class InnerClassTest {
                 }
             }
             assert new Outer().test() == 1
+        '''
+    }
+
+    @Test // GROOVY-10141
+    void testInnerClassIn2xAIC() {
+        assertScript '''
+            class Outer {
+                class Inner {
+                }
+                def obj = new Object() {
+                    String toString() {
+                        new Object() {
+                            String toString() {
+                                new Inner()
+                            }
+                        }
+                    }
+                }
+            }
+            new Outer().obj.toString()
         '''
     }
 

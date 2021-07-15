@@ -40,7 +40,7 @@ buildscript {
 
 plugins {
     id 'me.champeau.buildscan-recipes' version '0.2.3'
-    id 'com.github.ben-manes.versions' version '0.38.0'
+    id 'com.github.ben-manes.versions' version '0.39.0'
     id 'com.github.blindpirate.osgi' version '0.0.4'
     id 'org.sonarqube' version '3.0'
     id 'org.apache.groovy-core'
@@ -229,11 +229,11 @@ tasks.named('test') {
     dependsOn testExtensionModuleJar
 }
 
-if (!JavaVersion.current().java10Compatible) {
+if (!JavaVersion.current().java11Compatible) {
     logger.lifecycle '''
 **************************************** WARNING ********************************************
 ******   You are running the build with an older JDK. NEVER try to release with 1.8.   ******
-******   You must use a JDK 10+ in order to compile all features of the language.      ******
+******   You must use a JDK 11+ in order to compile all features of the language.      ******
 *********************************************************************************************
 '''
 }

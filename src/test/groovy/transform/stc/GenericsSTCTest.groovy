@@ -453,6 +453,38 @@ class GenericsSTCTest extends StaticTypeCheckingTestCase {
         '''
     }
 
+    // GROOVY-10098
+    void testReturnTypeInferenceWithMethodGenerics16() {
+        assertScript '''
+            @groovy.transform.TupleConstructor(defaults=false)
+            class C<T extends Number> {
+              T p
+              T m() {
+                Closure<T> x = { -> p }
+                x() // Cannot return value of type Object on method returning type T
+              }
+            }
+            assert new C<>(42).m() == 42
+        '''
+    }
+
+    // GROOVY-8638
+    void testReturnTypeInferenceWithMethodGenerics17() {
+        assertScript '''
+            @Grab('com.google.guava:guava:30.1.1-jre')
+            import com.google.common.collect.*
+
+            ListMultimap<String, Integer> mmap = ArrayListMultimap.create()
+
+            Map<String, Collection<Integer>> map = mmap.asMap()
+            Set<Map.Entry<String, Collection<Integer>>> set = map.entrySet()
+            Iterator<Map.Entry<String, Collection<Integer>>> it = set.iterator()
+            while (it.hasNext()) { Map.Entry<String, Collection<Integer>> entry = it.next()
+                Collection<Integer> values = entry.value
+            }
+        '''
+    }
+
     void testDiamondInferrenceFromConstructor1() {
         assertScript '''
             class Foo<U> {
@@ -1747,6 +1779,7 @@ class GenericsSTCTest extends StaticTypeCheckingTestCase {
         assertScript '''
             Map<String, Integer> foo = null
             Integer result = foo?.get('a')
+            assert result == null
         '''
     }
 
@@ -1754,6 +1787,7 @@ class GenericsSTCTest extends StaticTypeCheckingTestCase {
         assertScript '''
             List<Integer> foo = null
             Integer result = foo?.get(0)
+            assert result == null
         '''
     }
 
@@ -1762,8 +1796,20 @@ class GenericsSTCTest extends StaticTypeCheckingTestCase {
             List<Integer> foo = [1]
             foo = null
             Integer result = foo?.get(0)
+            assert result == null
         '''
+    }
 
+    // GROOVY-10107
+    void testAssignNullTypeParameterWithUpperBounds() {
+        assertScript '''
+            class C<T extends Number> {
+                void m() {
+                    T n = null
+                }
+            }
+            new C<Long>().m()
+        '''
     }
 
     void testMethodCallWithArgumentUsingNestedGenerics() {
@@ -2903,7 +2949,7 @@ class GenericsSTCTest extends StaticTypeCheckingTestCase {
     // GROOVY-6760
     void testGenericsAtMethodLevelWithGenericsInTypeOfGenericType() {
         assertScript '''
-            @Grab(group='com.netflix.rxjava', module='rxjava-core', version='0.18.1')
+            @Grab('com.netflix.rxjava:rxjava-core:0.18.1')
             import rx.Observable
             import java.util.concurrent.Callable
 

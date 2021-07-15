@@ -126,7 +126,13 @@ class QueryableHelper {
     private QueryableHelper() {}
 
     private static class ThreadPoolHolder {
-        static final ExecutorService THREAD_POOL = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
+        static int seq
+        static final ExecutorService THREAD_POOL = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors(), (Runnable r) -> {
+            Thread t = new Thread(r)
+            t.setName("ginq-thread-" + seq++)
+            t.setDaemon(true)
+            return t
+        })
         private ThreadPoolHolder() {}
     }
 }

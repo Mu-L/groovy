@@ -19,6 +19,7 @@
 package groovy.lang;
 
 import org.apache.groovy.internal.util.UncheckedThrow;
+import org.apache.groovy.lang.GroovyObjectHelper;
 import org.apache.groovy.util.BeanUtils;
 import org.apache.groovy.util.SystemUtil;
 import org.codehaus.groovy.GroovyBugError;
@@ -35,8 +36,10 @@ import org.codehaus.groovy.reflection.ClassInfo;
 import org.codehaus.groovy.reflection.GeneratedMetaMethod;
 import org.codehaus.groovy.reflection.ParameterTypes;
 import org.codehaus.groovy.reflection.ReflectionCache;
+import org.codehaus.groovy.reflection.ReflectionUtils;
 import org.codehaus.groovy.reflection.android.AndroidSupport;
 import org.codehaus.groovy.runtime.ArrayTypeUtils;
+import org.codehaus.groovy.runtime.ArrayUtil;
 import org.codehaus.groovy.runtime.ConvertedClosure;
 import org.codehaus.groovy.runtime.CurriedClosure;
 import org.codehaus.groovy.runtime.DefaultGroovyMethods;
@@ -85,6 +88,8 @@ import java.beans.BeanInfo;
 import java.beans.EventSetDescriptor;
 import java.beans.Introspector;
 import java.beans.PropertyDescriptor;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
@@ -106,15 +111,19 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Function;
 
 import static groovy.lang.Tuple.tuple;
 import static java.lang.Character.isUpperCase;
 import static org.apache.groovy.util.Arrays.concat;
 import static org.codehaus.groovy.ast.tools.GeneralUtils.inSamePackage;
 import static org.codehaus.groovy.reflection.ReflectionCache.isAssignableFrom;
+import static org.codehaus.groovy.reflection.ReflectionUtils.parameterTypeMatches;
+import static org.codehaus.groovy.runtime.MetaClassHelper.castArgumentsToClassArray;
 
 /**
  * Allows methods to be dynamically added to existing classes at runtime
@@ -255,7 +264,7 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
      */
     @Override
     public List respondsTo(final Object obj, final String name, final Object[] argTypes) {
-        Class[] classes = MetaClassHelper.castArgumentsToClassArray(argTypes);
+        Class[] classes = castArgumentsToClassArray(argTypes);
         MetaMethod m = getMetaMethod(name, classes);
         if (m != null) {
             return Collections.singletonList(m);
@@ -315,7 +324,7 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
      */
     @Override
     public MetaMethod getStaticMetaMethod(final String name, final Object[] argTypes) {
-        Class[] classes = MetaClassHelper.castArgumentsToClassArray(argTypes);
+        Class[] classes = castArgumentsToClassArray(argTypes);
         return pickStaticMethod(name, classes);
     }
 
@@ -324,7 +333,7 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
      */
     @Override
     public MetaMethod getMetaMethod(final String name, final Object[] argTypes) {
-        Class[] classes = MetaClassHelper.castArgumentsToClassArray(argTypes);
+        Class[] classes = castArgumentsToClassArray(argTypes);
         return pickMethod(name, classes);
     }
 
@@ -621,6 +630,7 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
     }
 
     private void inheritInterfaceNewMetaMethods(final Set<CachedClass> interfaces) {
+        Method[] theClassMethods = null;
         // add methods declared by DGM for interfaces
         for (CachedClass face : interfaces) {
             for (MetaMethod method : getNewMetaMethods(face)) {
@@ -628,11 +638,13 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
                 // skip DGM methods on an interface if the class already has the method
                 // but don't skip for GroovyObject-related methods as it breaks things :-(
                 if (method instanceof GeneratedMetaMethod && !isAssignableFrom(GroovyObject.class, method.getDeclaringClass().getTheClass())) {
-                    for (Method m : theClass.getMethods()) {
-                        if (method.getName().equals(m.getName())
+                    final String generatedMethodName = method.getName();
+                    final CachedClass[] generatedMethodParameterTypes = method.getParameterTypes();
+                    for (Method m : (null == theClassMethods ? theClassMethods = theClass.getMethods() : theClassMethods)) {
+                        if (generatedMethodName.equals(m.getName())
                                 // below not true for DGM#push and also co-variant return scenarios
                                 //&& method.getReturnType().equals(m.getReturnType())
-                                && MetaMethod.equal(method.getParameterTypes(), m.getParameterTypes())) {
+                                && MetaMethod.equal(generatedMethodParameterTypes, m.getParameterTypes())) {
                             skip = true;
                             break;
                         }
@@ -916,7 +928,7 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
         if (theClass != instanceKlazz && theClass.isAssignableFrom(instanceKlazz))
             instanceKlazz = theClass;
 
-        Class<?>[] argClasses = MetaClassHelper.castArgumentsToClassArray(arguments);
+        Class<?>[] argClasses = castArgumentsToClassArray(arguments);
 
         MetaMethod method = findMixinMethod(methodName, argClasses);
         if (method != null) {
@@ -1124,6 +1136,147 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
      */
     @Override
     public Object invokeMethod(Class sender, Object object, String methodName, Object[] originalArguments, boolean isCallToSuper, boolean fromInsideClass) {
+        try {
+            return doInvokeMethod(sender, object, methodName, originalArguments, isCallToSuper, fromInsideClass);
+        } catch (MissingMethodException mme) {
+            return doInvokeMethodFallback(sender, object, methodName, originalArguments, isCallToSuper, mme);
+        }
+    }
+
+    private static class MethodHandleHolder {
+        private static final MethodHandle CLONE_ARRAY_METHOD_HANDLE;
+        static {
+            Optional<Method> methodOptional = Arrays.stream(ArrayUtil.class.getDeclaredMethods()).filter(m -> "cloneArray".equals(m.getName())).findFirst();
+            if (!methodOptional.isPresent()) {
+                throw new GroovyBugError("Failed to find `cloneArray` method in class `" + ArrayUtil.class.getName() + "`");
+            }
+            Method cloneArrayMethod = methodOptional.get();
+
+            try {
+                CLONE_ARRAY_METHOD_HANDLE = MethodHandles.lookup().in(ArrayUtil.class).unreflect(cloneArrayMethod);
+            } catch (IllegalAccessException e) {
+                throw new GroovyBugError("Failed to create method handle for " + cloneArrayMethod);
+            }
+        }
+        private MethodHandleHolder() {}
+    }
+
+    private static final ClassValue<Map<String, Set<Method>>> SPECIAL_METHODS_MAP = new ClassValue<Map<String, Set<Method>>>() {
+        @Override
+        protected Map<String, Set<Method>> computeValue(Class<?> type) {
+            return new ConcurrentHashMap<>(4);
+        }
+    };
+
+    private Object doInvokeMethodFallback(Class sender, Object object, String methodName, Object[] originalArguments, boolean isCallToSuper, MissingMethodException mme) {
+        MethodHandles.Lookup lookup = null;
+        if (object instanceof GroovyObject) {
+            Optional<MethodHandles.Lookup> lookupOptional = GroovyObjectHelper.lookup((GroovyObject) object);
+            if (!lookupOptional.isPresent()) throw mme;
+            lookup = lookupOptional.get();
+        }
+
+        final Class<?> receiverClass = object.getClass();
+        if (isCallToSuper) {
+            if (null == lookup) throw mme;
+            MethodHandles.Lookup tmpLookup = lookup;
+            MethodHandle superMethodHandle = findMethod(sender, methodName, castArgumentsToClassArray(originalArguments), superMethod -> {
+                try {
+                    return tmpLookup.unreflectSpecial(superMethod, receiverClass);
+                } catch (IllegalAccessException e) {
+                    return null;
+                }
+            });
+            if (null == superMethodHandle) throw mme;
+            try {
+                return superMethodHandle.bindTo(object).invokeWithArguments(originalArguments);
+            } catch (Throwable t) {
+                throw new GroovyRuntimeException(t);
+            }
+        } else {
+            if (receiverClass.isArray()) {
+                if ("clone".equals(methodName) && 0 == originalArguments.length) {
+                    try {
+                        Object[] array = (Object[]) object;
+                        Object[] result = (Object[]) MethodHandleHolder.CLONE_ARRAY_METHOD_HANDLE.invokeExact(array);
+                        return result;
+                    } catch (Throwable t) {
+                        throw new GroovyRuntimeException(t);
+                    }
+                }
+                throw mme;
+            }
+
+            final boolean spyFound = null != lookup;
+            if (!spyFound) {
+                try {
+                    lookup = MethodHandles.lookup().in(receiverClass);
+                } catch (IllegalArgumentException e) {
+                    throw mme;
+                }
+            }
+            MethodHandles.Lookup tmpLookup = lookup;
+            MethodHandle thisMethodHandle = findMethod(receiverClass, methodName, castArgumentsToClassArray(originalArguments), thisMethod -> {
+                try {
+                    if (spyFound) return tmpLookup.unreflectSpecial(thisMethod, receiverClass);
+
+                    return tmpLookup.unreflect(thisMethod);
+                } catch (IllegalAccessException e) {
+                    return null;
+                }
+            });
+            if (null == thisMethodHandle) throw mme;
+            try {
+                return thisMethodHandle.bindTo(object).invokeWithArguments(originalArguments);
+            } catch (Throwable t) {
+                throw new GroovyRuntimeException(t);
+            }
+        }
+    }
+
+    private static void cacheMethod(Class<?> clazz, Method method) {
+        SPECIAL_METHODS_MAP.get(clazz)
+                .computeIfAbsent(method.getName(), k -> Collections.newSetFromMap(new ConcurrentHashMap<>(2)))
+                .add(method);
+    }
+
+    private static MethodHandle findMethod(Class<?> clazz, String methodName, Class[] argTypes, Function<Method, MethodHandle> mhFunc) {
+        Set<Method> methods = SPECIAL_METHODS_MAP.get(clazz).get(methodName);
+
+        Method foundMethod = null;
+        if (null != methods) {
+            for (Method method : methods) {
+                if (parameterTypeMatches(method.getParameterTypes(), argTypes)) {
+                    foundMethod = method;
+                    break;
+                }
+            }
+        }
+
+        if (null == foundMethod) {
+            foundMethod = doFindMethod(clazz, methodName, argTypes);
+            if (null == foundMethod) return null;
+            cacheMethod(clazz, foundMethod);
+        }
+
+        return mhFunc.apply(foundMethod);
+    }
+
+    private static Method doFindMethod(Class clazz, String messageName, Class[] argTypes) {
+        for (Class<?> c = clazz; null != c; c = c.getSuperclass()) {
+            List<Method> declaredMethodList = ReflectionUtils.getDeclaredMethods(c, messageName, argTypes);
+            if (!declaredMethodList.isEmpty()) {
+                Method superMethod = declaredMethodList.get(0);
+                if (Modifier.isAbstract(superMethod.getModifiers())) {
+                    continue;
+                }
+                return superMethod;
+            }
+        }
+        return null;
+    }
+
+    private Object doInvokeMethod(Class sender, Object object, String methodName, Object[] originalArguments, boolean isCallToSuper, boolean fromInsideClass) {
         checkInitalised();
         if (object == null) {
             throw new NullPointerException("Cannot invoke method: " + methodName + " on null object");
@@ -2184,61 +2337,30 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
         return tuple(method, mp);
     }
 
-    private static MetaMethod getCategoryMethodMissing(Class sender) {
-        List possibleGenericMethods = GroovyCategorySupport.getCategoryMethods(METHOD_MISSING);
-        if (possibleGenericMethods != null) {
-            for (Object possibleGenericMethod : possibleGenericMethods) {
-                MetaMethod mmethod = (MetaMethod) possibleGenericMethod;
-                if (!mmethod.getDeclaringClass().getTheClass().isAssignableFrom(sender))
-                    continue;
-
-                CachedClass[] paramTypes = mmethod.getParameterTypes();
-                if (paramTypes.length == 2 && paramTypes[0].getTheClass() == String.class) {
-                    return mmethod;
-                }
-            }
-        }
-        return null;
+    private static CategoryMethod getCategoryMethodMissing(final Class<?> sender) {
+        return findCategoryMethod(METHOD_MISSING, sender, params ->
+            params.length == 2 && params[0].getTheClass() == String.class
+        );
     }
 
-    private static MetaMethod getCategoryMethodGetter(Class sender, String name, boolean useLongVersion) {
-        List possibleGenericMethods = GroovyCategorySupport.getCategoryMethods(name);
-        if (possibleGenericMethods != null) {
-            for (Object possibleGenericMethod : possibleGenericMethods) {
-                MetaMethod mmethod = (MetaMethod) possibleGenericMethod;
-                if (!mmethod.getDeclaringClass().getTheClass().isAssignableFrom(sender))
-                    continue;
-
-                CachedClass[] paramTypes = mmethod.getParameterTypes();
-                if (useLongVersion) {
-                    if (paramTypes.length == 1 && paramTypes[0].getTheClass() == String.class) {
-                        return mmethod;
-                    }
-                } else {
-                    if (paramTypes.length == 0) return mmethod;
-                }
-            }
-        }
-        return null;
+    private static CategoryMethod getCategoryMethodGetter(final Class<?> sender, final String name, final boolean useLongVersion) {
+        return findCategoryMethod(name, sender, params ->
+            useLongVersion ? params.length == 1 && params[0].getTheClass() == String.class : params.length == 0
+        );
     }
 
-    private static MetaMethod getCategoryMethodSetter(Class sender, String name, boolean useLongVersion) {
-        List possibleGenericMethods = GroovyCategorySupport.getCategoryMethods(name);
-        if (possibleGenericMethods != null) {
-            for (Object possibleGenericMethod : possibleGenericMethods) {
-                MetaMethod mmethod = (MetaMethod) possibleGenericMethod;
-                if (!mmethod.getDeclaringClass().getTheClass().isAssignableFrom(sender))
-                    continue;
+    private static CategoryMethod getCategoryMethodSetter(final Class<?> sender, final String name, final boolean useLongVersion) {
+        return findCategoryMethod(name, sender, params ->
+            useLongVersion ? params.length == 2 && params[0].getTheClass() == String.class : params.length == 1
+        );
+    }
 
-                CachedClass[] paramTypes = mmethod.getParameterTypes();
-                if (useLongVersion) {
-                    if (paramTypes.length == 2 && paramTypes[0].getTheClass() == String.class) {
-                        return mmethod;
-                    }
-                } else {
-                    if (paramTypes.length == 1) return mmethod;
-                }
-            }
+    private static CategoryMethod findCategoryMethod(final String name, final Class<?> sender, final java.util.function.Predicate<CachedClass[]> paramFilter) {
+        List<CategoryMethod> categoryMethods = GroovyCategorySupport.getCategoryMethods(name);
+        if (categoryMethods != null) {
+            return categoryMethods.stream().filter(categoryMethod ->
+                categoryMethod.getDeclaringClass().isAssignableFrom(sender) && paramFilter.test(categoryMethod.getParameterTypes())
+            ).sorted().findFirst().orElse(null);
         }
         return null;
     }
@@ -2319,37 +2441,33 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
         Object ret = null;
 
         if (methodOrList instanceof MetaMethod) {
-            MetaMethod element = (MetaMethod) methodOrList;
-            int parameterCount = element.getParameterTypes().length;
-            if (!isGetter &&
-                    //(element.getReturnType() == Void.class || element.getReturnType() == Void.TYPE) &&
-                    parameterCount == 1) {
-                ret = element;
+            MetaMethod method = (MetaMethod) methodOrList;
+            int parameterCount = method.getParameterTypes().length;
+            Class<?> returnType = method.getReturnType();
+            if (!isGetter && parameterCount == 1
+                    //&& returnType == Void.TYPE
+            ) {
+                ret = method;
             }
-            Class returnType = element.getReturnType();
-            if (isGetter &&
-                    !(returnType == Void.class || returnType == Void.TYPE) &&
-                    (!booleanGetter || returnType == Boolean.class || returnType == Boolean.TYPE) &&
-                    parameterCount == 0) {
-                ret = element;
+            if (isGetter && parameterCount == 0 && (booleanGetter ? returnType == Boolean.TYPE
+                    : returnType != Void.TYPE && returnType != Void.class)) {
+                ret = method;
             }
-        }
-        if (methodOrList instanceof FastArray) {
+        } else if (methodOrList instanceof FastArray) {
             FastArray methods = (FastArray) methodOrList;
-            final int len = methods.size();
+            final int n = methods.size();
             final Object[] data = methods.getArray();
-            for (int i = 0; i != len; ++i) {
+            for (int i = 0; i < n; i += 1) {
                 MetaMethod element = (MetaMethod) data[i];
                 int parameterCount = element.getParameterTypes().length;
-                if (!isGetter &&
-                        //(element.getReturnType() == Void.class || element.getReturnType() == Void.TYPE) &&
-                        parameterCount == 1) {
+                Class<?> returnType = element.getReturnType();
+                if (!isGetter && parameterCount == 1
+                        //&& returnType == Void.TYPE
+                ) {
                     ret = addElementToList(ret, element);
                 }
-                Class returnType = element.getReturnType();
-                if (isGetter &&
-                        !(returnType == Void.class || returnType == Void.TYPE) &&
-                        parameterCount == 0) {
+                if (isGetter && parameterCount == 0 && (booleanGetter ? returnType == Boolean.TYPE
+                        : returnType != Void.TYPE && returnType != Void.class)) {
                     ret = addElementToList(ret, element);
                 }
             }
@@ -2582,17 +2700,15 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
 
     private void applyStrayPropertyMethods(LinkedList<CachedClass> superClasses, Map<CachedClass, LinkedHashMap<String, MetaProperty>> classPropertyIndex, boolean isThis) {
         // now look for any stray getters that may be used to define a property
-        for (CachedClass klass : superClasses) {
-            MetaMethodIndex.Header header = metaMethodIndex.getHeader(klass.getTheClass());
-            Map<String, MetaProperty> propertyIndex = classPropertyIndex.computeIfAbsent(klass, k -> new LinkedHashMap<>());
+        for (CachedClass superClass : superClasses) {
+            MetaMethodIndex.Header header = metaMethodIndex.getHeader(superClass.getTheClass());
+            Map<String, MetaProperty> propertyIndex = classPropertyIndex.computeIfAbsent(superClass, sc -> new LinkedHashMap<>());
             for (MetaMethodIndex.Entry e = header.head; e != null; e = e.nextClassEntry) {
                 String methodName = e.name;
-                // name too short?
-                final int methodNameLength = methodName.length();
-                if (methodNameLength < 3 ||
-                        (methodNameLength < 4 && !methodName.startsWith("is"))) continue;
-                // possible getter/setter?
+                int methodNameLength = methodName.length();
                 boolean isBooleanGetter = methodName.startsWith("is");
+                if (methodNameLength < (isBooleanGetter ? 3 : 4)) continue;
+
                 boolean isGetter = methodName.startsWith("get") || isBooleanGetter;
                 boolean isSetter = methodName.startsWith("set");
                 if (!isGetter && !isSetter) continue;
@@ -2604,8 +2720,7 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
                 if (propertyMethods instanceof MetaMethod) {
                     createMetaBeanProperty(propertyIndex, propName, isGetter, (MetaMethod) propertyMethods);
                 } else {
-                    LinkedList<MetaMethod> methods = (LinkedList<MetaMethod>) propertyMethods;
-                    for (MetaMethod m : methods) {
+                    for (MetaMethod m : (Iterable<MetaMethod>) propertyMethods) {
                         createMetaBeanProperty(propertyIndex, propName, isGetter, m);
                     }
                 }
@@ -2647,13 +2762,19 @@ public class MetaClassImpl implements MetaClass, MutableMetaClass {
         } else if (mp instanceof MultipleSetterProperty) {
             MultipleSetterProperty msp = (MultipleSetterProperty) mp;
             if (isGetter) {
-                msp.setGetter(propertyMethod);
+                // GROOVY-10133: do not replace "isPropName()" with "getPropName()" or ...
+                if (msp.getGetter() == null || !msp.getGetter().getName().startsWith("is")) {
+                    msp.setGetter(propertyMethod);
+                }
             }
             return msp;
         } else if (mp instanceof MetaBeanProperty) {
             MetaBeanProperty mbp = (MetaBeanProperty) mp;
             if (isGetter) {
-                mbp.setGetter(propertyMethod);
+                // GROOVY-10133: do not replace "isPropName()" with "getPropName()" or ...
+                if (mbp.getGetter() == null || !mbp.getGetter().getName().startsWith("is")) {
+                    mbp.setGetter(propertyMethod);
+                }
                 return mbp;
             } else if (mbp.getSetter() == null || mbp.getSetter() == propertyMethod) {
                 mbp.setSetter(propertyMethod);

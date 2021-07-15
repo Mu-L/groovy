@@ -145,7 +145,6 @@ import static org.apache.groovy.util.BeanUtils.decapitalize;
 import static org.codehaus.groovy.ast.ClassHelper.AUTOCLOSEABLE_TYPE;
 import static org.codehaus.groovy.ast.ClassHelper.BigDecimal_TYPE;
 import static org.codehaus.groovy.ast.ClassHelper.BigInteger_TYPE;
-import static org.codehaus.groovy.ast.ClassHelper.Boolean_TYPE;
 import static org.codehaus.groovy.ast.ClassHelper.Byte_TYPE;
 import static org.codehaus.groovy.ast.ClassHelper.CLASS_Type;
 import static org.codehaus.groovy.ast.ClassHelper.CLOSURE_TYPE;
@@ -215,6 +214,7 @@ import static org.codehaus.groovy.ast.tools.GeneralUtils.block;
 import static org.codehaus.groovy.ast.tools.GeneralUtils.callX;
 import static org.codehaus.groovy.ast.tools.GeneralUtils.castX;
 import static org.codehaus.groovy.ast.tools.GeneralUtils.constX;
+import static org.codehaus.groovy.ast.tools.GeneralUtils.getGetterName;
 import static org.codehaus.groovy.ast.tools.GeneralUtils.getSetterName;
 import static org.codehaus.groovy.ast.tools.GeneralUtils.isOrImplements;
 import static org.codehaus.groovy.ast.tools.GeneralUtils.localVarX;
@@ -1562,11 +1562,11 @@ public class StaticTypeCheckingVisitor extends ClassCodeVisitorSupport {
                     }
                 }
 
-                MethodNode getter = findGetter(current, "get" + capName, pexp.isImplicitThis());
+                MethodNode getter = findGetter(current, "is" + capName, pexp.isImplicitThis());
                 getter = allowStaticAccessToMember(getter, staticOnly);
-                if (getter == null) getter = findGetter(current, "is" + capName, pexp.isImplicitThis());
+                if (getter == null) getter = findGetter(current, getGetterName(propertyName), pexp.isImplicitThis());
                 getter = allowStaticAccessToMember(getter, staticOnly);
-                List<MethodNode> setters = findSetters(current, getSetterName(propertyName), false);
+                List<MethodNode> setters = findSetters(current, getSetterName(propertyName), /*enforce void:*/false);
                 setters = allowStaticAccessToMember(setters, staticOnly);
 
                 // need to visit even if we only look for setters for compatibility
@@ -1632,7 +1632,7 @@ public class StaticTypeCheckingVisitor extends ClassCodeVisitorSupport {
             for (ClassNode dgmReceiver : isPrimitiveType(receiverType) ? new ClassNode[]{receiverType, getWrapper(receiverType)} : new ClassNode[]{receiverType}) {
                 List<MethodNode> methods = findDGMMethodsByNameAndArguments(getSourceUnit().getClassLoader(), dgmReceiver, "get" + capName, ClassNode.EMPTY_ARRAY);
                 for (MethodNode method : findDGMMethodsByNameAndArguments(getSourceUnit().getClassLoader(), dgmReceiver, "is" + capName, ClassNode.EMPTY_ARRAY)) {
-                    if (Boolean_TYPE.equals(getWrapper(method.getReturnType()))) methods.add(method);
+                    if (isPrimitiveBoolean(method.getReturnType())) methods.add(method);
                 }
                 if (isUsingGenericsOrIsArrayUsingGenerics(dgmReceiver)) {
                     methods.removeIf(method -> // GROOVY-10075: "List<Integer>" vs "List<String>"
@@ -2207,10 +2207,10 @@ public class StaticTypeCheckingVisitor extends ClassCodeVisitorSupport {
             }
             if (isStringType(inferredReturnType) && isGStringOrGStringStringLUB(type)) {
                 type = STRING_TYPE; // GROOVY-9971: convert GString to String at point of return
-            } else if (inferredReturnType != null && !inferredReturnType.isGenericsPlaceHolder()
-                    && !type.isUsingGenerics() && !type.equals(inferredReturnType) && (inferredReturnType.isInterface()
-                            ? type.implementsInterface(inferredReturnType) : type.isDerivedFrom(inferredReturnType))) {
-                type = inferredReturnType; // GROOVY-10082: allow simple covariance
+            } else if (inferredReturnType != null
+                    && !GenericsUtils.hasUnresolvedGenerics(inferredReturnType)
+                    &&  GenericsUtils.buildWildcardType(inferredReturnType).isCompatibleWith(type)) {
+                type = inferredReturnType; // GROOVY-8310, GROOVY-10082, GROOVY-10091: allow simple covariance
             }
             return type;
         }
@@ -2575,11 +2575,6 @@ public class StaticTypeCheckingVisitor extends ClassCodeVisitorSupport {
             // method has already been visited by a static type checking visitor
             return;
         }
-        for (Parameter parameter : node.getParameters()) {
-            if (parameter.getInitialExpression() != null) {
-                parameter.getInitialExpression().visit(this);
-            }
-        }
         super.visitConstructor(node);
     }
 
@@ -2600,27 +2595,14 @@ public class StaticTypeCheckingVisitor extends ClassCodeVisitorSupport {
         typeCheckingContext.alreadyVisitedMethods.add(node);
 
         typeCheckingContext.pushErrorCollector(collector);
-
         boolean osc = typeCheckingContext.isInStaticContext;
         try {
             typeCheckingContext.isInStaticContext = node.isStatic();
+
             super.visitMethod(node);
-            for (Parameter parameter : node.getParameters()) {
-                if (parameter.getInitialExpression() != null) {
-                    parameter.getInitialExpression().visit(this);
-                }
-            }
-/*
-            ClassNode rtype = getInferredReturnType(node);
-            if (rtype == null) {
-                storeInferredReturnType(node, node.getReturnType());
-            }
-            addTypeCheckingInfoAnnotation(node);
-*/
         } finally {
             typeCheckingContext.isInStaticContext = osc;
         }
-
         typeCheckingContext.popErrorCollector();
         node.putNodeMetaData(ERROR_COLLECTOR, collector);
     }
@@ -3451,11 +3433,13 @@ public class StaticTypeCheckingVisitor extends ClassCodeVisitorSupport {
                             typeCheckClosureCall(callArguments, args, parameters);
                         }
                         ClassNode type = getType(((ASTNode) variable));
-                        if (CLOSURE_TYPE.equals(type)) {
+                        if (CLOSURE_TYPE.equals(type)) { // GROOVY-10098, et al.
                             GenericsType[] genericsTypes = type.getGenericsTypes();
-                            type = OBJECT_TYPE;
-                            if (genericsTypes != null && !genericsTypes[0].isPlaceholder()) {
-                                type = genericsTypes[0].getType();
+                            if (genericsTypes != null && genericsTypes.length == 1
+                                    && genericsTypes[0].getLowerBound() == null) {
+                                type = getCombinedBoundType(genericsTypes[0]);
+                            } else {
+                                type = OBJECT_TYPE;
                             }
                         }
                         if (type != null) {
@@ -4137,14 +4121,20 @@ public class StaticTypeCheckingVisitor extends ClassCodeVisitorSupport {
     }
 
     @Override
-    public void visitArrayExpression(ArrayExpression source) {
-        super.visitArrayExpression(source);
-        ClassNode elementType = source.getElementType();
-        for (Expression expression : source.getExpressions()) {
-            if (!checkCast(elementType, expression)) {
-                addStaticTypeError("Cannot assign value of type " +
-                        prettyPrintType(getType(expression)) + " into array of type " +
-                        prettyPrintType(source.getType()), expression);
+    public void visitArrayExpression(final ArrayExpression expression) {
+        super.visitArrayExpression(expression);
+        ClassNode elementType;
+        List<Expression> expressions;
+        if (expression.hasInitializer()) {
+            elementType = expression.getElementType();
+            expressions = expression.getExpressions();
+        } else {
+            elementType = int_TYPE;
+            expressions = expression.getSizeExpression();
+        }
+        for (Expression elementExpr : expressions) {
+            if (!checkCompatibleAssignmentTypes(elementType, getType(elementExpr), elementExpr, false)) {
+                addStaticTypeError("Cannot convert from " + prettyPrintType(getType(elementExpr)) + " to " + prettyPrintType(elementType), elementExpr);
             }
         }
     }
@@ -4208,8 +4198,9 @@ public class StaticTypeCheckingVisitor extends ClassCodeVisitorSupport {
             expression.getBooleanExpression().visit(this);
         }
         Expression trueExpression = expression.getTrueExpression();
+        ClassNode typeOfTrue = findCurrentInstanceOfClass(trueExpression, null);
         trueExpression.visit(this);
-        ClassNode typeOfTrue = findCurrentInstanceOfClass(trueExpression, getType(trueExpression));
+        if (typeOfTrue == null) typeOfTrue = getType(trueExpression);
         typeCheckingContext.popTemporaryTypeInfo(); // instanceof doesn't apply to false branch
         Expression falseExpression = expression.getFalseExpression();
         falseExpression.visit(this);
@@ -4974,7 +4965,7 @@ public class StaticTypeCheckingVisitor extends ClassCodeVisitorSupport {
         return null;
     }
 
-    protected void collectAllInterfaceMethodsByName(final ClassNode type, final String name, final List<MethodNode> methods) {
+    private static void collectAllInterfaceMethodsByName(final ClassNode type, final String name, final List<MethodNode> methods) {
         Set<ClassNode> done = new LinkedHashSet<>();
         for (ClassNode next = type; next != null; next = next.getSuperClass()) {
             done.add(next);

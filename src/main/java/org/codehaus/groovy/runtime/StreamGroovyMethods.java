@@ -28,8 +28,8 @@ public class StreamGroovyMethods {
     }
 
     /**
-     * TODO
-     *
+     * Returns a lazily concatenated stream whose elements are all the elements of this stream followed by all the elements of the {@link Collection} object.
+     * 
      * <pre class="groovyTestCase">
      * import java.util.stream.Stream
      * assert (Stream.of(1) + [2]).toList() == [1,2]
@@ -43,7 +43,7 @@ public class StreamGroovyMethods {
     }
 
     /**
-     * TODO
+     * Returns a lazily concatenated stream whose elements are all the elements of this stream followed by all the elements of the {@link Iterable} object.
      *
      * <pre class="groovyTestCase">
      * import java.util.stream.Stream
@@ -58,11 +58,11 @@ public class StreamGroovyMethods {
     }
 
     /**
-     * TODO
+     * Returns a lazily concatenated stream whose elements are all the elements of this stream followed by all the elements of the second stream.
      *
      * <pre class="groovyTestCase">
      * import java.util.stream.Stream
-     * assert (Stream.of(1) + Stream.&lt;Integer>empty()).toList() == [1]
+     * assert (Stream.of(1) + Stream.&lt;Integer&gt;empty()).toList() == [1]
      * assert (Stream.of(1) + Stream.of(2)).toList() == [1,2]
      * assert (Stream.of(1) + [2].stream()).toList() == [1,2]
      * </pre>
@@ -243,7 +243,7 @@ public class StreamGroovyMethods {
      *
      * <pre class="groovyTestCase">
      * class Items implements Iterable<String> {
-     *   Iterator&lt;String> iterator() {
+     *   Iterator&lt;String&gt; iterator() {
      *     ['one', 'two'].iterator()
      *   }
      * }

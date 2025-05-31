@@ -51,7 +51,6 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -62,6 +61,7 @@ import java.io.Reader;
 import java.io.Writer;
 import java.lang.reflect.Field;
 import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.security.PrivilegedAction;
 import java.util.List;
 import java.util.Vector;
@@ -358,7 +358,7 @@ public class Groovy extends Java {
             }
         }
 
-        if (src == null && command.length() == 0) {
+        if (src == null && command.isEmpty()) {
             throw new BuildException("Source does not exist!", getLocation());
         }
 
@@ -381,13 +381,13 @@ public class Groovy extends Java {
 
                 // if there are no groovy statements between the enclosing Groovy tags
                 // then read groovy statements in from a resource using the src attribute
-                if (command == null || command.trim().length() == 0) {
+                if (command == null || command.trim().isEmpty()) {
                     Reader reader;
                     if (src instanceof FileResource) {
                         File file = ((FileResource) src).getFile();
                         createClasspath().add(new Path(getProject(), file.getParentFile().getCanonicalPath()));
                         if (encoding != null && !encoding.isEmpty()) {
-                            reader = new LineNumberReader(new InputStreamReader(new FileInputStream(file), encoding));
+                            reader = new LineNumberReader(new InputStreamReader(Files.newInputStream(file.toPath()), encoding));
                         } else {
                             reader = new CharsetToolkit(file).getReader();
                         }
@@ -726,7 +726,7 @@ public class Groovy extends Java {
             return fr.getFile().getAbsolutePath();
         } else {
             String name = PREFIX;
-            if (getLocation().getFileName().length() > 0)
+            if (!getLocation().getFileName().isEmpty())
                 name += getLocation().getFileName().replaceAll("[^\\w_\\.]", "_").replaceAll("[\\.]", "_dot_");
             else
                 name += SUFFIX;

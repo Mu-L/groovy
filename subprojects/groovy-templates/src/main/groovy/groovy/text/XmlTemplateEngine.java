@@ -92,7 +92,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * How are you today?
  * &lt;/document&gt;
  * </pre>
- * The XML template engine can also be used as the engine for {@link groovy.servlet.TemplateServlet} by placing the
+ * The XML template engine can also be used as the engine for {@code groovy.servlet.TemplateServlet} by placing the
  * following in your web.xml file (plus a corresponding servlet-mapping element):
  * <pre>
  * &lt;servlet&gt;
@@ -244,7 +244,7 @@ public class XmlTemplateEngine extends TemplateEngine {
                 // check uri and for legacy cases just check prefix name (not recommended)
                 if ("http://groovy.codehaus.org/2005/gsp".equals(qn.getNamespaceURI()) || "gsp".equals(qn.getPrefix())) {
                     String s = qn.getLocalPart();
-                    if (s.length() == 0) {
+                    if (s.isEmpty()) {
                         throw new RuntimeException("No local part after 'gsp:' given in node " + node);
                     }
                     printGroovyTag(s, node.text());

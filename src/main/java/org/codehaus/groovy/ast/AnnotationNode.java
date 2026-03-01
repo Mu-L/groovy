@@ -47,13 +47,9 @@ public class AnnotationNode extends ASTNode {
     public static final int RECORD_COMPONENT_TARGET = 1 << 10;
     public static final int TYPE_TARGET             = ANNOTATION_TARGET | 1; // GROOVY-7151
 
-    private static final int ALL_TARGETS = TYPE_TARGET | CONSTRUCTOR_TARGET | METHOD_TARGET
-            | FIELD_TARGET | PARAMETER_TARGET | LOCAL_VARIABLE_TARGET | ANNOTATION_TARGET
-            | PACKAGE_TARGET | TYPE_PARAMETER_TARGET | TYPE_USE_TARGET | RECORD_COMPONENT_TARGET;
-
     private final ClassNode classNode;
     private Map<String, Expression> members;
-    private int allowedTargets = ALL_TARGETS;
+    private int allowedTargets = 0x4FF; // GROOVY-11838: JLS 9.6.4.1
     private boolean runtimeRetention = false, sourceRetention = false, /*explicit*/ classRetention = false;
 
     public AnnotationNode(final ClassNode type) {

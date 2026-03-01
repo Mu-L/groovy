@@ -25,6 +25,19 @@ import static org.junit.jupiter.api.Assertions.*
 
 final class AnnotationNodeTest {
 
+    // GROOVY-11838
+    @Test
+    void testIsTargetAllowed() {
+        def node = new AnnotationNode(ClassHelper.OVERRIDE_TYPE)
+
+        assertTrue(node.isTargetAllowed(AnnotationNode.TYPE_TARGET))
+        assertTrue(node.isTargetAllowed(AnnotationNode.FIELD_TARGET))
+        assertTrue(node.isTargetAllowed(AnnotationNode.METHOD_TARGET))
+
+        assertFalse(node.isTargetAllowed(AnnotationNode.TYPE_USE_TARGET))
+        assertFalse(node.isTargetAllowed(AnnotationNode.TYPE_PARAMETER_TARGET))
+    }
+
     @Test
     void testGetText() {
         def node = new AnnotationNode(ClassHelper.OVERRIDE_TYPE)
